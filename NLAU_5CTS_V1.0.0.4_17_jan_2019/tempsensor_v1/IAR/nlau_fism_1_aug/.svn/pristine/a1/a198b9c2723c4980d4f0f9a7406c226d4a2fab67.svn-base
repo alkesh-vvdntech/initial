@@ -1,0 +1,413 @@
+// ************************************************
+//
+// XLINK configuration file for MSP430FR5969
+//
+// Copyright 1996-2015 IAR Systems AB.
+//
+// See the file 430/doc/licenses/IARSourceLicense.txt for detailed
+// license information.
+//
+// $Revision: 13028 $
+//
+// ************************************************
+
+// ---------------------------------------------------------
+// Description
+//
+
+//
+// Usage:
+//
+//   xlink [file file ...] -f lnk430fr5969.xcl
+//
+// -----------------------------------------------
+// Device summary
+//
+
+//
+// Core:                           MSP430Xv2
+//
+// Interrupt vectors:              56 (FF90-FFFF)
+//
+// Signature memory:               16 Bytes (FF80-FF8F)
+//
+// JTAG Signature memory:          4 Bytes (FF80-FF83)
+//
+// BSL Signature memory:           4 Bytes (FF84-FF87)
+//
+// IPE Signature memory:           8 Bytes (FF88-FF8F)
+//
+// Peripheral units:               00100-00FFF
+//
+// Information memory (FRAM):      01800-019FF
+//
+// Read/write memory (RAM):        01C00-023FF
+//
+// Persistent memory (FRAM):       04400-0FFFF
+//                                 10000-13FFF
+//
+
+
+// -----------------------------------------------
+// Bootloader Memory Map
+//
+
+/////////////////////////// MCU FRAM ADDRESSES ////////////////////////////////
+//
+-D_FRAM_INFO_START=1800
+-D_FRAM_INFO_END=19FF
+-D_FRAM_INFOA_START=1980
+-D_FRAM_INFOA_END=_FRAM_INFO_END
+-D_FRAM_INFOB_START=1900
+-D_FRAM_INFOB_END=(_FRAM_INFOA_START-1)
+-D_FRAM_INFOC_START=1880
+-D_FRAM_INFOC_END=(_FRAM_INFOB_START-1)
+-D_FRAM_INFOD_START=1800
+-D_FRAM_INFOD_END=(_FRAM_INFOC_START-1)
+
+-D_FRAM_MAIN_START=4400
+-D_FRAM_MAIN_END=FFFF
+
+-D_FRAM_SIG_START=FF80
+-D_FRAM_SIG_END=FF8F
+-D_FRAM_JTAGSIG_START=_FRAM_SIG_START
+-D_FRAM_BSLSIG_START=(_FRAM_JTAGSIG_START+4)
+-D_FRAM_IPESIG_START=(_FRAM_BSLSIG_START+4)
+-D_FRAM_JTAGSIG_END=(_FRAM_BSLSIG_START-1)
+-D_FRAM_BSLSIG_END=(_FRAM_IPESIG_START-1)
+-D_FRAM_IPESIG_END=(_FRAM_SIG_END-1)
+
+
+-D_FRAM_VECTORS_START=FF90
+-D_FRAM_RESET_VECTOR=FFFE //always FFFE
+
+-D_FRAM_HIGH_START=10000
+-D_FRAM_HIGH_END=13FFF
+
+/////////////////////////// MCU RAM ADDRESSES //////////////////////////////////
+//
+-D_RAM_START=1C00
+-D_RAM_END=23FF
+
+///////////////////////// BOOT AREA FRAM ADDRESSES ////////////////////////////
+//
+// Start address of Boot Area
+    -D_BOOT_Start=C400
+// End address of FRAM Boot area
+    -D_BOOT_End=(_FRAM_SIG_START-1)
+// FatFs Library Call Table at end of Booloader
+    -D_FATFS_VECTOR=(_FRAM_SIG_START-30)
+// And I2C library after that
+    -D_I2C_VECTOR=(_FATFS_VECTOR-8)
+    -D_I2C_VECTOR_END=(_FATFS_VECTOR-1)
+// And LCD library after that
+    -D_LCD_VECTOR=(_I2C_VECTOR-2C)
+    -D_LCD_VECTOR_END=(_I2C_VECTOR-1)
+// One more for the delay vector
+    -D_DELAY_VECTOR=(_LCD_VECTOR-4)
+    -D_DELAY_VECTOR_END=(_LCD_VECTOR-1)
+// Start address of Information memory area used by Boot
+    -D_BOOT_Info_Start=_FRAM_INFO_START
+// End address of Information memory area used by Boot
+    -D_BOOT_Info_End=_FRAM_INFO_END
+
+/////////// APP INFO ADDRESSES (NO CODE - RAM saving) /////////
+//
+// Start address of Information memory area used by Boot
+    -D_App_Info_Start=_FRAM_INFO_END
+// End address of Information memory area used by Boot
+    -D_App_Info_End=_FRAM_INFO_END
+
+///////////////////////////// APP AREA FRAM ADDRESSES /////////////////////////
+//
+// Start address of non-initialized UserSpace (not included in checksum)
+    -D_UserSpace_Start=_FRAM_MAIN_START
+// End address of non-initialized UserSpace
+    -D_UserSpace_End=(_UserSpace_Start+1400-1)
+// Application Checksum address
+    -D_AppChecksum=(_UserSpace_End+1)
+// Address of FRAM Password (2B)
+    -D_AppUpdate_Password_Addr=(_AppChecksum+2)
+// Address of Status and Control Area (1B)
+    -D_AppUpdate_Status_Addr=(_AppUpdate_Password_Addr+2)
+// Application Start address (after checksum and update variables)
+    -D_App_Main_Start=(_AppUpdate_Status_Addr+1)
+// Application End Address
+    -D_App_Main_End=(_BOOT_Start-1)
+// Application reset vector
+    -D_App_Reset_Vector=(_App_Main_End-1)
+// Start address of Proxy vector table
+    -D_App_Proxy_Vector_Start=(_App_Reset_Vector-64)
+// End address of Proxy vector table
+    -D_App_Proxy_Vector_End=(_App_Reset_Vector-1)
+// Application High Start Address    
+    -D_App_High_Start=_FRAM_HIGH_START
+// Application High Start Address  
+    -D_App_High_Const_Start=(_App_High_Start+40) //IAR provided linker files always start high const here
+// Application High End Address 
+    -D_App_High_End=_FRAM_HIGH_END
+// Size of main area calculated by CRC (App_Main)
+    -D_CRC_Main_Size=(_App_Main_End-_App_Main_Start+1)
+// Size of high area calculated by CRC (App_High)
+    -D_CRC_High_Size=(_App_High_End-_App_High_Start+1)
+
+//////////////////////// BOOT AREA RAM ADDRESSES ///////////////////////////////
+//
+// Start address of Boot RAM
+    -D_BOOT_RAM_START=_RAM_START
+// End address of Boot RAM
+    -D_BOOT_RAM_END=(_BOOT_RAM_START+531)
+    
+/////////// BOOT-APP RAM ADDRESSES (can be overwritten by App or Boot) /////////
+//
+// Start address of RAM used by App and Boot
+    -D_SHARED_RAM_START=(_BOOT_RAM_END+1)
+// End address of RAM used by App and Boot
+    -D_SHARED_RAM_END=_RAM_END
+
+//
+// End Bootloader Memory Map
+// -----------------------------------------------
+
+
+// -----------------------------------------------
+// Segments
+//
+
+// -------------------------------------
+// Data read/write segments
+//
+
+//
+// The following segments are available for both
+// the DATA16 and DATA20 segment groups.
+//
+// segment         Usage
+// -------         --------------------------
+// DATA<nn>_Z      Data initialized to zero
+// DATA<nn>_I      Data initialized by copying from DATA<nn>_ID
+// DATA<nn>_N      Data defined using __no_init
+// DATA<nn>_P      Data defined using __persistent
+// DATA<nn>_HEAP   The heap used by 'malloc' and 'free'
+//
+// segment         Usage
+// -------         --------------------------
+// CSTACK          Runtime stack
+// TLS16_I         Thread-local storage for main thread
+//
+
+
+// -------------------------------------
+// Program and data read-only segments
+//
+
+//
+// The following segments are available for both
+// the DATA16 and DATA20 segment groups.
+//
+// segment         Usage
+// -------         --------------------------
+// DATA<nn>_C      Constant data, including string literals
+// DATA<nn>_ID     Initializers for DATA<nn>_I
+//
+// segment         Usage
+// -------         --------------------------
+// INFO            Information memory
+// INFOA           Information memory, bank A
+// INFOB           Information memory, bank B
+// INFOC           Information memory, bank C
+// INFOD           Information memory, bank D
+// CSTART          Program startup code
+// CODE            Program code
+// ISR_CODE        Program code for interrupt service routines
+// DIFUNCT         Dynamic initialization vector used by C++
+// CHECKSUM        Checksum byte(s) generated by the -J option
+// SIGNATURE       Signature memory
+// JTAGSIGNATURE   JTAG Signature memory
+// BSLSIGNATURE    BSL Signature memory
+// IPESIGNATURE    IPE Signature memory
+// INTVEC          Interrupt vectors
+// RESET           The reset vector
+// TLS16_ID        Thread-local initializers for main thread
+// MPU_B<N>        Memory Protection Unit border
+// IPE_B<N>        Intellectual Property Encapsulation border
+// IPECODE16       IPE code
+// IPEDATA16_C     IPE constant data
+//
+// Notes:
+//
+// * The segments CSTART, ISR_CODE, and DIFUNCT, as well as the segments in
+//   the DATA16 and TLS16 segment groups must be placed in in the range
+//   0000-FFFD.
+//
+// * The INFOx and INFO segments overlap, this allows data either to be
+//   placed in a specific bank or anywhere in the info memory.
+//
+// * The INTVEC and RESET segments overlap. This allows an application to
+//   either use the reset vector provided by the runtime library, or
+//   provide a reset function by defining an interrupt function associated
+//   with the reset vector.
+//
+// * To use the Memory Protection Unit, the symbol ?mpu2_init should be
+//   included in the application. The symbol '__iar_430_MPU_base' should be
+//   defined to the location of the MPU peripheral registers, and the
+//   registers '__iar_430_MPUSAM_value' and '__iar_430_MPUCTL0_value' to
+//   the value the registers MPUSAM and MPUCTL0 should be initialized to,
+//   respectively.
+//
+// * To include Intellectual Property Encapsulation (IPE), the library
+//   label '__iar_430_ipe_signature' must be included in the application.
+//   (One way to do this is to use the -g XLINK command-line option.) The
+//   symbol '__iar_430_MPUIPC0_value' must be defined to the value the
+//   MPUIPC0 register should be initialized to.
+//
+// * To include custom segments in the Intellectual Property Encapsulation
+//   (IPE) area, place them between the segments IPE_B1 and IPE_B2.
+//
+
+
+// ---------------------------------------------------------
+// Configuration
+//
+
+// -----------------------------------------------
+// Stack and heap sizes
+//
+
+// Uncomment for command line use
+//-D_STACK_SIZE=160
+//-D_DATA16_HEAP_SIZE=160
+//-D_DATA20_HEAP_SIZE=160
+//-g?mpu2_init
+//-g__iar_430_ipe_signature
+
+
+// -----------------------------------------------
+// Define cpu
+//
+
+-cmsp430
+
+
+// -----------------------------------------------
+// Support for placing functions in read/write memory
+//
+
+-QCODE_I=CODE_ID
+
+
+// -----------------------------------------------
+// Support for thread local storage
+//
+
+-QTLS16_I=TLS16_ID
+
+
+// -----------------------------------------------
+// Hardware multiplier location
+//
+
+-D__iar_HWMUL=4C0
+
+
+// ---------------------------------------------------------
+// Placement directives
+//
+
+// -----------------------------------------------
+// Information memory
+//
+
+//-Z(CONST)INFO=1800-19FF
+//-Z(CONST)INFOA=1980-19FF
+//-Z(CONST)INFOB=1900-197F
+//-Z(CONST)INFOC=1880-18FF
+//-Z(CONST)INFOD=1800-187F
+
+
+// -----------------------------------------------
+// RAM memory
+//
+
+-Z(DATA)DATA16_I,DATA16_Z,DATA16_N,TLS16_I,AGGREGATE=_BOOT_RAM_START-_BOOT_RAM_END
+-Z(DATA)CODE_I
+-Z(DATA)DATA20_I,DATA20_Z,DATA20_N=_SHARED_RAM_START-_SHARED_RAM_END
+-Z(DATA)CSTACK+_STACK_SIZE#
+-Z(DATA)RAW_BLOCK=_BOOT_Info_Start-_BOOT_Info_End
+
+// -----------------------------------------------
+// FRAM memory
+//
+
+// -------------------------------------
+// Low memory 0-0FFFF
+//
+
+// ---------------------------
+// Read/write data in FRAM
+//
+
+-Z(CONST)DATA16_P,DATA20_P=_BOOT_Start-_BOOT_End
+-Z(DATA)DATA16_HEAP+_DATA16_HEAP_SIZE
+-Z(DATA)DATA20_HEAP+_DATA20_HEAP_SIZE
+
+// ---------------------------
+// Memory Protection Unit (MPU) border
+//
+
+-Z(CONST)MPU_B1
+
+// ---------------------------
+// Memory Protection Unit (MPU) border
+//
+
+-Z(CONST)MPU_B2
+
+// ---------------------------
+// Constant data
+//
+
+-Z(CONST)DATA16_C,DATA16_ID,TLS16_ID,DIFUNCT,CHECKSUM=_BOOT_Start-_BOOT_End
+
+// ---------------------------
+// Code
+//
+
+-Z(CODE)CSTART,ISR_CODE,CODE16=_BOOT_Start-_BOOT_End
+
+
+// -------------------------------------
+// All memory 0-FFFFF
+//
+
+// ---------------------------
+// Code
+//
+
+-Z(CODE)FRAM_PASSWORD=_AppUpdate_Password_Addr
+-Z(CODE)FRAM_STATCTRL=_AppUpdate_Status_Addr
+-Z(CODE)FATFS_VTABLE=_FATFS_VECTOR-_BOOT_End
+-Z(CODE)I2C_VTABLE=_I2C_VECTOR-_I2C_VECTOR_END
+-Z(CODE)LCD_VTABLE=_LCD_VECTOR-_LCD_VECTOR_END
+-Z(CODE)DELAY_VTABLE=_DELAY_VECTOR-_DELAY_VECTOR_END
+-P(CODE)CODE=_BOOT_Start-_BOOT_End
+-Z(CODE)CODE_PAD
+
+// ---------------------------
+// Constant data
+//
+
+-Z(CONST)DATA20_C,DATA20_ID,CODE_ID=_BOOT_Start-_BOOT_End
+
+
+// -------------------------------------
+// Signature memory and interrupt vectors
+//
+
+-Z(CONST)SIGNATURE=_FRAM_SIG_START-_FRAM_SIG_END
+-Z(CONST)JTAGSIGNATURE=_FRAM_JTAGSIG_START-_FRAM_JTAGSIG_END
+-Z(CONST)BSLSIGNATURE=_FRAM_BSLSIG_START-_FRAM_BSLSIG_END
+-Z(CONST)IPESIGNATURE=_FRAM_IPESIG_START-_FRAM_IPESIG_END
+-Z(CODE)BOOT_VECTOR_TABLE#(_FRAM_RESET_VECTOR-1)
+-Z(CODE)INTVEC=_FRAM_VECTORS_START-_FRAM_MAIN_END
+-Z(CODE)RESET=_FRAM_RESET_VECTOR-_FRAM_MAIN_END

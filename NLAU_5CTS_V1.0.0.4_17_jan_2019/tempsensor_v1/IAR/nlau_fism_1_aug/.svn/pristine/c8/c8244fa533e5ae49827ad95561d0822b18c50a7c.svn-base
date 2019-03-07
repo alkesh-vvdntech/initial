@@ -1,0 +1,66 @@
+# Configuration SERVER BACKEND & Device
+[SYSTEM]
+AppVersion=CT5 # CT5 for Coldtrace, or ST5 for stovetrace NON-EVIN
+Buzzer_Off=N   # Disables or enables buzzer on device
+Buzzer_Toggle=N # when true, the buzzer and LCD backlight will pulse on and off during alarms
+TimeZone=22	# add 22 quarters in UTC time to get IST time
+Text_Persist=Y # when false, LCD text is cleared whenever LCD is turned off
+
+[POWER]
+StateForcedUpload=Y # when false, power available changes will not trigger uploads
+
+[SERVER]
+GPRSModeEnabled=Y # sets Upload Mode to allow/not allow GPRS transmission
+GSMModeEnabled=Y # sets Upload Mode to allow/not allow GSM transmission
+
+############ Production settings ##############
+
+# nl prudction testing
+#GatewaySMS=+919212594827
+#GatewayKey=evin
+#GatewayIP=103.230.39.231
+#Upload_URL=/coldtrace/uploads/l/v3/
+#Config_URL=/coldtrace/intel/config/
+#DeviceReady_URL=/coldtrace/intel/config/
+#DeviceAlarm_URL=/coldtrace/intel/config/
+
+# evin testing settings
+GatewaySMS=+919246356765
+GatewayKey=EVTM
+GatewayIP=103.19.88.155
+Upload_URL=/v2/temp
+Config_URL=/v2/config
+DeviceReady_URL=/v2/devices/ready
+DeviceAlarm_URL=/v2/alarms
+
+
+############## Service Mode ##################
+# service mode is for factory bring up and 
+# for field debugging
+GatewaySMS_NL=+919212594827
+GatewayKey_NL=cldt
+GatewayIP_NL=103.230.39.231
+Upload_URL_NL=/coldtrace/uploads/l/v3/
+Config_URL_NL=/coldtrace/ct5demo/config/kvp/v1/
+DeviceReady_URL_NL=/coldtrace/intel/config/
+DeviceAlarm_URL_NL=/coldtrace/intel/config/
+
+# Configuration SIM cards
+[SIM1]
+APN=airtelgprs.com
+#APN=airtelgprs.com
+
+[SIM2]
+APN=airtelgprs.com
+#APN=airtelgprs.com
+
+[SMS]
+DeviceReadyOnBoot=Y # enables sms device ready during boot after factory reset or sim id change
+API_Failover=Y      # enables sms failover for config device ready (in the future for alarm apis too)
+
+# Intervals are in minutes for the events
+[INTERVALS]
+Sampling=1		# How often a sample is taken
+Upload=5	# Upload to the server
+LCDoff=0		# Length to persist LCD backlight after show (0 = always on)
+

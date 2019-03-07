@@ -1,0 +1,14 @@
+Nexleaf
+Debug
+Debug_OldHw
+BootDebug
+BootTestDebug
+Release
+settings
+path.txt
+coldtrace5.dep
+*.tmp
+*.orig
+*.dep
+*.ewd
+*.ewt

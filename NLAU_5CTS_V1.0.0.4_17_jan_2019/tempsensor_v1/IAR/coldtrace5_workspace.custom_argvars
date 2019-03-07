@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+
+<iarUserArgVars>
+  <group active="true" name="coldtrace5">
+    <variable>
+      <name>SOURCE_DIR</name>
+      <value>$PROJ_DIR$\..</value>
+    </variable>
+  </group>
+</iarUserArgVars>
+
+

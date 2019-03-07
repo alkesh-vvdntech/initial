@@ -1,0 +1,184 @@
+#include <msp430.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include "debug.h"
+#include "main_system.h"
+
+#define _POLLING_
+#define DIAG_BUFF_LEN	10
+//unsigned char tx[200];
+//unsigned char len=0;
+unsigned char diagnosis_buff[DIAG_BUFF_LEN];
+unsigned char diag_command[DIAG_BUFF_LEN];
+signed char diag_buff_len;
+
+void debug_init()
+{
+  // Configure USCI_A0 for UART mode
+  UCA0CTLW0 = UCSWRST;                    // Put eUSCI in reset
+  UCA0CTLW0 |= UCSSEL__SMCLK;             // CLK = SMCLK
+ // UCA0BRW = 104;                           // buad rate = 9600, smclk = 16MHZ
+ // UCA0MCTLW |= 0xD600;
+  UCA0BRW = 52;                           // buad rate = 9600, smclk = 16MHZ
+  UCA0MCTLW |= UCOS16 | UCBRF_1 | 0x4900;
+  UCA0CTLW0 &= ~UCSWRST;                  // release from reset
+}
+
+#ifdef _POLLING_
+void debug_print(char *cmd)
+{
+   while(*cmd!='\0')
+    {
+        UCA0TXBUF=*cmd++;
+        while(UCA0STATW&=UCBUSY);
+    }
+}
+
+#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+//#pragma vector=USCI_A0_VECTOR
+__interrupt void USCI_A0_ISR(void)
+#elif defined(__GNUC__)
+void __attribute__ ((interrupt(USCI_A0_VECTOR))) USCI_A0_ISR (void)
+#else
+#error Compiler not supported!
+#endif
+{
+  unsigned char ch;
+  switch(__even_in_range(UCA0IV,USCI_UART_UCTXCPTIFG))
+  {
+    /*case USCI_UART_UCTXIFG:
+    {
+      UCA0TXBUF = tx[len];
+      len++;
+      if(tx[len] == NULL)
+      {
+        UCA0IE &= ~UCTXIE;
+        len=0;
+        memset(tx, 0, sizeof(tx));
+      }
+    }*/
+    case USCI_UART_UCRXIFG:
+     ch=UCA0RXBUF;
+      diagnosis_buff[diag_buff_len]=ch;
+      diag_buff_len=(diag_buff_len+1)%DIAG_BUFF_LEN;
+      if((ch=='\r'|| ch=='\n'))
+      {
+        flags.check_diagnosis=TRUE;
+      }
+      break;
+   default:
+    break;
+  }
+}
+
+void enable_diagnosis()
+{
+    UCA0IE |= UCRXIE;
+}
+
+
+void disable_diagnosis()
+{
+    UCA0IE&= ~UCRXIE;
+}
+/**********************************************************************************************
+ * Function Name :uint8_t check_diagnosis_command()
+ * Parameters : void
+ * Return : uint8_t
+ * Description : Check '?' entered by user
+ **********************************************************************************************/
+uint8_t check_diagnosis_command()
+{
+	uint8_t index;
+	for(index=0;index<diag_buff_len;index++)
+	{
+		if(diagnosis_buff[index]=='\r' || diagnosis_buff[index]=='\n')
+			break;
+		else
+			diag_command[index]=diagnosis_buff[index];
+	}
+	diag_buff_len=0;
+
+	memset(diagnosis_buff,'\0',DIAG_BUFF_LEN);
+	return 1;
+}
+/**********************************************************************************************
+ * Function Name :void parse_diag_command()
+ * Parameters : void
+ * Return : void
+ * Description : Parse User choice & Diagnose
+ **********************************************************************************************/
+
+void parse_diag_command()
+{
+	if(!strcmp(diag_command,"?"))
+	{
+		debug_print("*****Enter your choice*****\r\n");
+		debug_print("1. See Stored Logs \r\n");
+		debug_print("2. See Error Logs\r\n");
+		debug_print("3. See Logs\r\n");
+
+	}
+	else if(!strcmp(diag_command,"1"))
+	{
+		debug_print("I Am in 1\r\n");
+	}
+	else if(!strcmp(diag_command,"2"))
+	{
+                  debug_print("I Am in 2\r\n");
+	}
+	else if(!strcmp(diag_command,"3"))
+	{
+          debug_print("I Am in 3\r\n");
+	}
+	else
+	{
+		debug_print("ERROR\r\n");
+		debug_print("Enter ? for help.\r\n");
+	}
+	enable_diagnosis();
+	memset(diag_command,'\0',DIAG_BUFF_LEN);
+}
+#else
+void debug_print(char *cmd)
+{
+  /*memcpy(tx,cmd,strlen(cmd));
+  UCA0IE |= UCTXIE;*/
+  while(*cmd!='\0')
+    {
+        UCA0TXBUF=*cmd++;
+        while(UCA0STATW&=UCBUSY);
+    }
+}
+
+
+
+#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+#pragma vector=USCI_A0_VECTOR
+__interrupt void USCI_A0_ISR(void)
+#elif defined(__GNUC__)
+void __attribute__ ((interrupt(USCI_A0_VECTOR))) USCI_A0_ISR (void)
+#else
+#error Compiler not supported!
+#endif
+{
+  switch(__even_in_range(UCA0IV,USCI_UART_UCTXCPTIFG))
+  {
+    case USCI_UART_UCTXIFG:
+    {
+      UCA0TXBUF = tx[len];
+      len++;
+      if(tx[len] == NULL)
+      {
+        UCA0IE &= ~UCTXIE;
+        len=0;
+        memset(tx, 0, sizeof(tx));
+      }
+    }
+    case USCI_UART_UCRXIFG:
+      UCA0TXBUF = UCA0RXBUF;
+    break;
+  }
+}
+#endif

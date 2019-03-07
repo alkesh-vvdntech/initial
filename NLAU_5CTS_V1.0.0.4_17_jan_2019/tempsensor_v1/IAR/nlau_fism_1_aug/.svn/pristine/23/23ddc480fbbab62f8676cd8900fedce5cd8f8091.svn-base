@@ -1,0 +1,872 @@
+/* Copyright (c) 2015, Intel Corporation. All rights reserved.
+ *
+ * INFORMATION IN THIS DOCUMENT IS PROVIDED IN CONNECTION WITH INTEL� PRODUCTS. NO LICENSE, EXPRESS OR IMPLIED,
+ * BY ESTOPPEL OR OTHERWISE, TO ANY INTELLECTUAL PROPERTY RIGHTS IS GRANTED BY THIS DOCUMENT. EXCEPT AS PROVIDED
+ * IN INTEL'S TERMS AND CONDITIONS OF SALE FOR SUCH PRODUCTS, INTEL ASSUMES NO LIABILITY WHATSOEVER, AND INTEL
+ * DISCLAIMS ANY EXPRESS OR IMPLIED WARRANTY, RELATING TO SALE AND/OR USE OF INTEL PRODUCTS INCLUDING LIABILITY
+ * OR WARRANTIES RELATING TO FITNESS FOR A PARTICULAR PURPOSE, MERCHANTABILITY, OR INFRINGEMENT OF ANY PATENT,
+ * COPYRIGHT OR OTHER INTELLECTUAL PROPERTY RIGHT.
+ * UNLESS OTHERWISE AGREED IN WRITING BY INTEL, THE INTEL PRODUCTS ARE NOT DESIGNED NOR INTENDED FOR ANY APPLICATION
+ * IN WHICH THE FAILURE OF THE INTEL PRODUCT COULD CREATE A SITUATION WHERE PERSONAL INJURY OR DEATH MAY OCCUR.
+ *
+ * Intel may make changes to specifications and product descriptions at any time, without notice.
+ * Designers must not rely on the absence or characteristics of any features or instructions marked
+ * "reserved" or "undefined." Intel reserves these for future definition and shall have no responsibility
+ * whatsoever for conflicts or incompatibilities arising from future changes to them. The information here
+ * is subject to change without notice. Do not finalize a design with this information.
+ * The products described in this document may contain design defects or errors known as errata which may
+ * cause the product to deviate from published specifications. Current characterized errata are available on request.
+ *
+ * This document contains information on products in the design phase of development.
+ * All Thermal Canyons featured are used internally within Intel to identify products
+ * that are in development and not yet publicly announced for release.  Customers, licensees
+ * and other third parties are not authorized by Intel to use Thermal Canyons in advertising,
+ * promotion or marketing of any product or services and any such use of Intel's internal
+ * Thermal Canyons is at the sole risk of the user.
+ *
+ */
+
+#include "thermalcanyon.h"
+#include "state_machine.h"
+#include "rtc.h"
+#include "buzzer.h"
+#include "alarms.h"
+#include "hardware_buttons.h"
+
+#define SYSTEM_SWITCH g_pSysState->system.switches
+#define STATE_ALARM g_pSysState->state.alarms
+
+// Overall state of the device to take decisions upon the state of the modem, storage, alerts, etc.
+
+#if defined(__TI_COMPILER_VERSION__)
+#pragma SET_DATA_SECTION(".state_machine")
+SYSTEM_STATE g_SystemState;	// system states to control errors, connectivity, retries, etc
+#pragma SET_DATA_SECTION()
+#elif defined(__IAR_SYSTEMS_ICC__)
+#pragma location="STATE_MACHINE"
+__no_init SYSTEM_STATE g_SystemState;	// system states to control errors, connectivity, retries, etc
+#else
+#error Compiler not supported!
+#endif
+
+SYSTEM_STATE *g_pSysState = &g_SystemState;
+
+/*************************************************************************************************************/
+/* General events that will generate responses from the system */
+/*************************************************************************************************************/
+uint8_t state_getSignalPercentage() {
+	return (uint8_t)(((float) (g_pSysState->signal_level - NETWORK_ZERO) * 100)
+			/ (NETWORK_MAX_SS - NETWORK_ZERO));
+}
+
+/***********************************************************************************************************************/
+/* STORAGE */
+/***********************************************************************************************************************/
+
+// There was a problem in the SD Card, reinit fat
+/*sachin void state_SD_card_problem(FRESULT fr, const char *szError) {
+	if (fr != FR_OK) {
+		// Activate try again later for the SD card to be re mounted.
+		if(STATE_ALARM.SD_card_failure != STATE_ON) {	
+	  		STATE_ALARM.SD_card_failure = STATE_ON;
+			SYSTEM_SWITCH.send_SD_alarm = true;
+		}
+
+		// Disable fat access while there is an error.
+		g_bFatInitialized = false;
+	}
+}*/
+
+/*void state_SD_card_OK() {
+	STATE_ALARM.SD_card_failure = STATE_OFF;
+}
+*/
+void state_check_SD_card() {
+
+	if (STATE_ALARM.SD_card_failure == STATE_ON) {
+		fat_init_drive();
+
+		if (g_bFatInitialized == true) {
+			// Fat was recovered!
+			STATE_ALARM.SD_card_failure = STATE_OFF;
+			return;
+		}
+
+		if (SYSTEM_SWITCH.send_SD_alarm) {
+			state_alarm_on("SD FAILURE");
+                        data_send_alarm();
+                        alarm_sms(SD_FAILURE, 0);
+			SYSTEM_SWITCH.send_SD_alarm = false;
+		}
+	}
+}
+
+//void state_setSMS_notSupported(SIM_CARD_CONFIG *sim) {
+//	sim->SMSNotSupported = 1;
+//}
+
+void state_sim_failure(SIM_CARD_CONFIG *sim) {
+	// 69 - "Requested facility not implemented"
+	// This cause indicates that the network is unable to provide the requested short message service.
+
+	char line1[17];
+	int t;
+	int split = 0;
+
+	// Split line looking for a space
+	int len = strlen(sim->simLastError);
+	if (len>14) {
+		for (t=16; t>6; t--) {
+			if (sim->simLastError[t]==' ') {
+				split=t;
+				break;
+			}
+		}
+
+		if (split>0) {
+			memcpy(line1, sim->simLastError, split);
+			line1[split]=0;
+//			lcd_printl(LINEC, line1);
+//			lcd_printl(LINEE, &sim->simLastError[split+1]);
+			return;
+		}
+	}
+
+//sachin	lcd_printl(LINEC, get_string(LCD_MSG, SIM_ERROR));
+//sachin	lcd_printl(LINEE, sim->simLastError);
+}
+
+/***********************************************************************************************************************/
+/* NETWORK STATE AND STATUS */
+/***********************************************************************************************************************/
+
+uint8_t state_isSimOperational() {
+	return g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot].simOperational;
+}
+
+void state_SIM_not_operational() {
+	g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot].simOperational = 0;
+}
+
+void state_SIM_operational() {
+	g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot].simOperational = 1;
+}
+
+void clear_mem(char *old_id) {
+  SIM_CARD_CONFIG *sim1 = config_getSIM();
+  if(!g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot].simOperational || !strcmp(old_id, sim1->cfgSimId))
+    memset(&g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot], 0, sizeof(SIM_CARD_CONFIG));
+}
+
+NETWORK_SERVICE inline *state_getCurrentService() {
+	if (g_pSysState->network_mode < 0 || g_pSysState->network_mode > 1)
+		g_pSysState->network_mode = 0;
+
+	return &g_pSysState->net_service[g_pSysState->network_mode];
+}
+
+char *state_getNetworkState() {
+	NETWORK_SERVICE *service = state_getCurrentService();
+	return service->network_state;
+}
+
+void state_setNetworkStatus(const char *status) {
+	NETWORK_SERVICE *service = state_getCurrentService();
+	zeroTerminateCopy(service->network_state, status);
+}
+
+/*sachin uint8_t state_getSignalLevel() {
+	return g_pSysState->signal_level;
+}*/
+
+int8_t state_isSignalInRange() {
+	int iSignalLevel = g_pSysState->signal_level;
+	if ((iSignalLevel < NETWORK_UP_SS) || (iSignalLevel > NETWORK_MAX_SS)) {
+		return 0;
+	}
+	return 1;
+}
+
+/*sachin void state_setSignalLevel(uint8_t iSignal) {
+	g_pSysState->signal_level = iSignal;
+}*/
+
+int8_t state_isNetworkRegistered() {
+	NETWORK_SERVICE *service = state_getCurrentService();
+
+	if (service->network_status == NETWORK_STATUS_REGISTERED_HOME_NETWORK
+			|| service->network_status == NETWORK_STATUS_REGISTERED_ROAMING)
+		return 1;
+
+	return 0;
+}
+
+uint8_t state_SimIdChanged() {
+	return g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot].fSimIdChanged;
+}
+
+void state_clearSimIdChanged() {
+	g_pDevCfg->SIM[g_pDevCfg->cfgSIM_slot].fSimIdChanged = 0;
+}
+
+/***********************************************************************************************************************/
+/* GENERAL */
+/***********************************************************************************************************************/
+
+//we handle some reboot logic here depending on whether a boot was scheduled or not
+void state_init() {
+        int8_t i;
+        //unscheduled/forced reboots get a full state clear
+	if(!g_pSysState->safeboot.disable.state_clear_on_boot || g_pSysState->safeboot.disable.state_first_init) { 
+		memset(g_pSysState, 0, sizeof(SYSTEM_STATE));
+
+		// Set the power to connected, if it is disconnected on boot it will be detected
+		SYSTEM_SWITCH.power_connected = true;
+
+                for ( i= 0; i< SYSTEM_NUM_SENSORS ; i++ ) {
+                    g_pSysState->temp.sensors[i].fTemperature = TEMP_BOOT_MAGIC_VAL;
+                }
+	}
+
+	//these defaults will always be reset for the boot sequence
+	g_pSysState->safeboot.disable.state_clear_on_boot = 0;
+
+	//top level
+	g_pSysState->signal_level = 0;
+	g_pSysState->network_mode = NETWORK_NOT_SELECTED;
+	memset(g_pSysState->net_service, 0, sizeof(g_pSysState->net_service));
+
+#ifndef _FISM_
+	g_pSysState->buzzerFeedback = 0;
+	//switches
+	SYSTEM_SWITCH.send_SD_alarm = 0;
+	SYSTEM_SWITCH.buzzer_sound = 0; //for now, but may want to be able to re-arm based on pre-boot status
+#endif
+	SYSTEM_SWITCH.http_enabled = 0;
+}
+
+uint8_t state_isGPRS() {
+	if (modem_getNetworkService() == NETWORK_GPRS)
+		return true;
+
+	return false;
+}
+
+uint8_t state_isGSM() {
+	if (modem_getNetworkService() == NETWORK_GSM)
+		return true;
+
+	return false;
+}
+
+/***********************************************************************************************************************/
+/* GENERATE ALARMS */
+/***********************************************************************************************************************/
+
+SYSTEM_SWITCHES *state_getSwitches() {
+	return &g_pSysState->system;
+}
+
+SYSTEM_ALARMS *state_getAlarms() {
+	return &g_pSysState->state;
+}
+
+void state_alarm_reset_sensors() {
+        int i = 0;
+	memset(g_pSysState->temp.alarms, 0, sizeof(g_pSysState->temp.alarms));
+        // memset(g_pSysState->temp.state, 0, sizeof(g_pSysState->temp.state));
+        
+        // preserved disabled state
+        for (i = 0; i < SYSTEM_NUM_SENSORS; i++) {
+          if (g_pSysState->temp.state[i].status & 0x20) {
+            g_pSysState->temp.state[i].status = 0;
+            g_pSysState->temp.state[i].status |= 0x20;
+          } else {
+            g_pSysState->temp.state[i].status = 0;
+          }
+        }
+      
+}
+
+void state_alarm_reset_battery() {
+	g_pSysState->time_batteryWarn = 0;
+	g_pSysState->count_batteryWarn = 0;
+}
+
+void state_alarm_reset_power() {
+	g_pSysState->time_powerOutage = 0;
+	g_pSysState->count_powerAlarm = 0;
+	g_pSysState->powerEventTimestamp = 0;
+}
+
+//void state_alarm_disable_buzzer_override() {
+//sachin	SYSTEM_SWITCHES *s = state_getSwitches();
+//	s->switches.button_buzzer_override = false;
+//        g_pSysState->system.switches.button_buzzer_override = false;
+//}
+
+//void state_alarm_enable_buzzer_override() {
+//sachin	SYSTEM_SWITCHES *s = state_getSwitches();
+//	if (s->switches.buzzer_sound == STATE_ON)
+//		s->switches.button_buzzer_override = true;
+//}
+
+//void state_alarm_turnoff_buzzer() {
+//sachin	SYSTEM_SWITCHES *s = state_getSwitches();
+//sachin	s->switches.buzzer_sound = STATE_OFF;
+//g_pSysState->system.switches.buzzer_sound = STATE_OFF;
+//}
+
+void state_alarm_turnon_buzzer() {
+//sachin	SYSTEM_SWITCHES *s = state_getSwitches();
+	if (!g_pDevCfg->cfg.logs.buzzer_disable) {
+                  g_pSysState->system.switches.button_buzzer_override = false;
+ //sachin	  	state_alarm_disable_buzzer_override();
+//sachin		s->switches.buzzer_sound = STATE_ON;
+		g_pSysState->system.switches.buzzer_sound = STATE_ON;
+                buzzer_start();
+	}
+}
+
+void state_alarm_on(char *alarm_msg) {
+//sachin	SYSTEM_ALARMS *s = state_getAlarms();
+	static uint16_t count = 0;
+	time_t elapsed;
+	
+	// We are already in alarm mode
+//	if (s->alarms.globalAlarm == STATE_ON) {
+//		return;
+//	}
+
+//sachin	s->alarms.globalAlarm = STATE_ON;
+g_pSysState->state.alarms.globalAlarm = STATE_ON;
+	elapsed = events_getTick() - count;
+	if (elapsed > 30) {
+		lcd_clear();
+		delay(500);
+//sachin		lcd_turn_on();
+
+		zeroTerminateCopy(g_pSysState->alarm_message, alarm_msg);
+//sachin		events_display_alarm(NULL, 0);
+		count = events_getTick();
+	}
+
+}
+
+// Everything is fine!
+void state_clear_alarm_state() {
+//sachin	SYSTEM_ALARMS *s = state_getAlarms();
+
+	//set buzzer OFF
+	//reset alarm state and counters
+	//set snooze because we want any alarms to still buzz
+	//s->alarms.snooze = 1;
+	//MAKE SURE BUZZER GOES OFF TIL NEXT TIME
+//sachin	state_alarm_turnoff_buzzer();
+        g_pSysState->system.switches.buzzer_sound = STATE_OFF;
+
+	// We were not in alarm mode
+	if (g_pSysState->state.alarms.globalAlarm == STATE_OFF)
+		return;
+
+	//strcat(g_pSysState->alarm_message, " cleared");
+	g_pSysState->state.alarms.globalAlarm = STATE_OFF;
+}
+
+// Actually force a clear of all alarm related variables
+void state_alarm_reset_all() {
+//	strcpy(g_pSysState->alarm_message, "");
+	state_alarm_reset_battery();
+	state_alarm_reset_power();
+	state_alarm_reset_sensors();
+        
+	g_pSysState->state.status = 0;
+	state_clear_alarm_state();
+}
+
+/***********************************************************************************************************************/
+/* MODEM & COMMUNICATIONS */
+/***********************************************************************************************************************/
+
+void state_check_modem() {
+	if (STATE_ALARM.modemFailure == STATE_ON) {
+		STATE_ALARM.modemFailure = STATE_OFF;
+		modem_reboot();
+	}
+}
+
+//void state_SMS_lastMessageACK(SIM_CARD_CONFIG *sim, int8_t msgNumber) {
+//	sim->last_SMS_message = msgNumber;
+//}
+
+//void state_reset_network_errors() {
+//	uint8_t i;
+//	for (i = 0; i < SYSTEM_NUM_SIM_CARDS; i++) {
+//		g_pSysState->simState[i].failsGPRS = 0;
+//		g_pSysState->simState[i].failsGSM = 0;
+//	}
+//}
+
+void state_network_status(int presentation_mode, int net_status) {
+	NETWORK_SERVICE *service = state_getCurrentService();
+	//service->network_presentation_mode = presentation_mode;
+	service->network_status = net_status;
+}
+
+// Clear all the errors for the network connection.
+//void state_network_success(uint8_t sim) {
+//	SIM_STATE *simState;
+//
+//	if (sim > 1)
+//		return;
+//	simState = &g_pSysState->simState[sim];
+//
+//	// Eveything is fine
+//	if (g_pSysState->network_mode == NETWORK_GSM)
+//		simState->failsGSM = 0;
+//
+//	if (g_pSysState->network_mode == NETWORK_GPRS)
+//		simState->failsGPRS = 0;
+//
+//	simState->modemErrors = 0;
+//}
+
+// Checks several parameters to see if we have to reset the modem, switch sim card, etc.
+/*sachin void state_network_fail(uint8_t sim, uint16_t error) {
+
+}*/
+
+//void state_failed_gprs(uint8_t sim) {
+//	if (sim > 1)
+//		return;
+//
+//	g_pSysState->simState[sim].failsGPRS++;
+//}
+
+//void state_failed_gsm(uint8_t sim) {
+//	if (sim > 1)
+//		return;
+//
+//	g_pSysState->simState[sim].failsGSM++;
+//}
+
+//transmit failures only
+void state_transmission_failed_gprs(uint8_t sim) {
+	if (sim > 1)
+		return;
+
+	//log all failures
+	//g_pSysState->simState[sim].failedTransmissionsGPRS++;
+}
+
+//transmit failures only
+//void state_transmission_failed_gsm(uint8_t sim) {
+//	if (sim > 1)
+//		return;
+//
+//	//log all failures
+//	g_pSysState->simState[sim].failedTransmissionsGSM++;
+//}
+
+/***********************************************************************************************************************/
+/* TEMPERATURE CHECKS */
+/***********************************************************************************************************************/
+
+/***********************************************************************************************************************/
+/* BATTERY CHECKS */
+/***********************************************************************************************************************/
+
+#define BATT_OK_TO_WARN_THRESHOLD 80
+#define BATT_WARN_TO_OK_THRESHOLD 95
+
+typedef enum {
+    BATT_STATUS_OK = 0,
+    BATT_STATUS_WARN,
+    BATT_STATUS_ALARM,
+    BATT_STATUS_CHARGING
+} DEV_ALARM_BATT_STATUS;
+
+//for now use this transition function to kick off an api packet
+static void state_set_batt_state(DEV_ALARM_BATT_STATUS state) {
+  
+    if(g_pSysState->battery_state != state) { //catch all transition behavior
+        g_pSysState->battery_state = state;
+#ifdef _EVIN_BUILD_
+        data_send_api_packet(API_PACKET_ALARM_BATT);
+#else
+        if (state == BATT_STATUS_ALARM) {
+            data_send_api_packet(API_PACKET_ALARM_BATT);
+        }
+#endif
+    }
+}
+
+uint8_t state_get_batt_status() {
+    return g_pSysState->battery_state;
+}
+
+//helper function for determining status and performing state transitions
+static void state_update_batt_status(uint8_t batt_level) {
+
+/*    switch(state_get_batt_status()) {
+        case BATT_STATUS_OK:
+        {
+            if(batt_level <= g_pDevCfg->stBattPowerAlertParam.battThreshold) {
+                state_set_batt_state(BATT_STATUS_ALARM);
+            } else if(batt_level <= BATT_OK_TO_WARN_THRESHOLD) {
+                state_set_batt_state(BATT_STATUS_WARN);
+            }
+        } break;
+        
+        case BATT_STATUS_WARN:
+        {
+            if(batt_level <= g_pDevCfg->stBattPowerAlertParam.battThreshold) {
+                state_set_batt_state(BATT_STATUS_ALARM);
+            } else if(batt_level > BATT_WARN_TO_OK_THRESHOLD) {
+                state_set_batt_state(BATT_STATUS_OK);
+            }
+        } break;
+
+        case BATT_STATUS_ALARM:
+        {
+            if(batt_level > BATT_WARN_TO_OK_THRESHOLD) {
+                state_set_batt_state(BATT_STATUS_OK);
+            } else if(batt_level > g_pDevCfg->stBattPowerAlertParam.battThreshold) {
+                state_set_batt_state(BATT_STATUS_WARN);
+            } 
+        } break;
+        
+	case BATT_STATUS_CHARGING:
+        default:
+        {
+            //handle errors? shouldn't get here
+            state_set_batt_state(BATT_STATUS_OK);
+        } break;
+    }*/
+  if(batt_level <= g_pDevCfg->stBattPowerAlertParam.battThreshold) {
+                state_set_batt_state(BATT_STATUS_ALARM);
+            } else if(batt_level <= BATT_OK_TO_WARN_THRESHOLD || batt_level > g_pDevCfg->stBattPowerAlertParam.battThreshold) {
+                state_set_batt_state(BATT_STATUS_WARN);
+            } else if(batt_level > BATT_WARN_TO_OK_THRESHOLD) {
+                state_set_batt_state(BATT_STATUS_OK);
+            } else 
+                 state_set_batt_state(BATT_STATUS_OK);
+  
+}
+
+void state_battery_level(uint8_t battery_level) 
+{
+                time_t elapsed = 0;
+                uint8_t batt_state;
+
+#ifndef _FISM_
+                g_pSysState->battery_level = battery_level;
+                state_update_batt_status(battery_level);
+                batt_state = state_get_batt_status();
+                
+                if (batt_state != BATT_STATUS_ALARM)
+                        return;
+
+                if (SYSTEM_SWITCH.power_connected == true) {
+                if(STATE_ALARM.battery) STATE_ALARM.battery = false;
+		return;
+    }
+#endif
+	//STATE_ALARM.battery = true;
+	if (g_pSysState->time_batteryWarn == 0)
+		 g_pSysState->time_batteryWarn = rtc_getUTCsecs();
+	else
+		elapsed = rtc_getUTCsecs() - g_pSysState->time_batteryWarn;
+
+	if(STATE_ALARM.battery == true) {
+		//opposite limits on this one - compared to power outage and temp alarms
+		if (elapsed <= ((time_t)g_pDevCfg->stAlarmRepeatParam.repeat_interval_secs * g_pSysState->count_batteryWarn) ||
+		    g_pSysState->count_batteryWarn >= g_pDevCfg->stAlarmRepeatParam.repeat_count_max) {
+                        goto skip_alert;
+		}
+	} else {
+		//only send api on the first alarm
+	  	STATE_ALARM.battery = true;
+	}
+
+	//alarm_sms_battery_level();
+        alarm_sms(BATT_FAILURE, 0);
+//	state_alarm_on("LOW BATTERY");
+	(g_pSysState->count_batteryWarn)++;
+
+skip_alert:
+//	if (battery_level < BATTERY_HIBERNATE_THRESHOLD)
+//		thermal_low_battery_hibernate();
+}
+
+/*char *g_stateBattStatusStrings[] = {
+    "FULL CHARGE",
+    "BATT WARN",
+    "BATT ALERT",
+    "CHARGING",
+    "POWER OUT"
+};*/
+
+/*
+ char * state_get_batt_string() {
+    char retString[9];
+    
+//    if (state_getAlarms()->alarms.battery) {
+//        retString = g_stateBattStatusStrings[2];
+//    } else if (POWER_OFF) {
+//        retString = g_stateBattStatusStrings[4];
+//    } else if (NOT_CHARGING || batt_getlevel() == 100) {
+//        retString = g_stateBattStatusStrings[0];
+//    } else {
+//        retString = g_stateBattStatusStrings[3];
+//    }
+    
+     if (state_getAlarms()->alarms.battery) {
+        strcpy(retString ,  "BAT ALRT");
+    } else if (POWER_OFF) {
+      strcpy(retString ,"PWR OUT");
+    } else if (NOT_CHARGING || batt_getlevel() == 100) {
+      strcpy(retString ,"FULL");
+    } else {
+      strcpy(retString,"CHRGING");
+    }
+    return retString;
+}
+*/
+/***********************************************************************************************************************/
+/* POWER CHECKS */
+/***********************************************************************************************************************/
+
+uint8_t state_isBuzzerOn() {
+	// Manual override by the button
+	if (SYSTEM_SWITCH.button_buzzer_override == true)
+		return false;
+
+	return SYSTEM_SWITCH.buzzer_sound;
+}
+
+// Power out, we store the time in which the power went down
+// called from the Interruption, careful
+
+void state_power_out() {
+
+	if (SYSTEM_SWITCH.power_connected == false)
+		return;
+
+	SYSTEM_SWITCH.power_connected = false;
+	SYSTEM_SWITCH.powerAvailChanged = true;
+	g_pSysState->powerEventTimestamp = rtc_getUTCsecs();
+#ifdef _FISM_
+	lcd_printl(LINEC, get_string(LCD_MSG, POWER_CABLE));
+	lcd_printf(LINEE, get_string(LCD_MSG, DISCONNECTED));
+    g_iHardware_actions = HWD_TURN_SCREEN;
+#endif
+}
+
+// called from the Interruption, careful
+void state_power_on() {
+
+	if (SYSTEM_SWITCH.power_connected == true)
+		return;
+
+	if (STATE_ALARM.poweroutage == STATE_ON) {
+		STATE_ALARM.poweroutage = STATE_OFF;
+	}
+
+	SYSTEM_SWITCH.power_connected = true;
+	SYSTEM_SWITCH.powerAvailChanged = true;
+	g_pSysState->powerEventTimestamp = rtc_getUTCsecs();
+	g_pSysState->time_powerOutage = 0;
+	g_pSysState->count_powerAlarm = 0;
+        
+#ifndef _FISM_
+	buzzer_feedback();
+#endif
+
+	g_pSysState->time_batteryWarn = 0;
+	g_pSysState->count_batteryWarn = 0;
+#ifndef _FISM_
+	lcd_printl(LINEC, get_string(LCD_MSG, POWER_RESUMED));
+	g_iHardware_actions = HWD_TURN_SCREEN;
+#endif
+}
+
+void state_check_power() {
+	time_t elapsed = 0;
+        UINT bytes_written = 0;
+        SYSTEM_ALARMS *s = &g_pSysState->state; //pointer to alarm states
+        
+	if (POWER_ON)
+		state_power_on();
+	else
+		state_power_out();
+
+        // if hibernating, then do not run any alarm checks or displayu code
+        if (s->alarms.hibernate == 1) {
+             return;
+        }
+
+	//if power is connected, leave
+	if (SYSTEM_SWITCH.power_connected == true)
+		return;
+
+	//not doing an alarm, leave
+	if (!g_pDevCfg->stBattPowerAlertParam.flags.bits.enablePowerAlert)
+		return;
+
+	//if battery alert threshold is 0, leave
+	if (g_pDevCfg->stBattPowerAlertParam.minutesPower == 0)
+		return;
+
+	if (g_pSysState->time_powerOutage == 0)
+		 g_pSysState->time_powerOutage = rtc_getUTCsecs();
+	else
+		elapsed = rtc_getUTCsecs() - g_pSysState->time_powerOutage;
+
+	if(STATE_ALARM.poweroutage == STATE_ON) {
+		if (elapsed - (g_pDevCfg->stBattPowerAlertParam.minutesPower * 60)
+		    > ((time_t)g_pDevCfg->stAlarmRepeatParam.repeat_interval_secs * g_pSysState->count_powerAlarm)
+		    && g_pSysState->count_powerAlarm <= g_pDevCfg->stAlarmRepeatParam.repeat_count_max) {
+			goto alarm_error;
+		}
+		return;
+	}
+
+	if (elapsed > (g_pDevCfg->stBattPowerAlertParam.minutesPower * 60)) {
+		goto alarm_error; //alarm tripped
+	}
+
+	return;
+
+
+        alarm_error:	
+	STATE_ALARM.poweroutage = STATE_ON;
+#ifndef _FISM_
+	state_alarm_turnon_buzzer();
+#endif
+	state_alarm_on("POWER OUT");
+#ifndef _EVIN_BUILD_
+        g_pSysState->time_flag = 1;
+        //g_pSysState->excursion_alarm_set[id] = true; 
+        g_pSysState->power_alarm_set = true;
+#ifndef _FISM_
+        log_sample_to_disk(&bytes_written);
+#endif        
+        g_pSysState->time_flag = 0;
+#endif
+        alarm_sms(POWER_FAILURE, elapsed);
+//	alarm_sms_power_outage(elapsed);
+	(g_pSysState->count_powerAlarm)++;
+#ifndef _EVIN_BUILD_
+        event_force_upload(0);
+#endif
+}
+
+/***********************************************************************************************************************/
+/* Check the state of every component */
+/***********************************************************************************************************************/
+
+void state_check_alarm_states() {
+	int t;
+//	SYSTEM_ALARMS *s = state_getAlarms();
+	SENSOR_STATUS *sensor;
+
+//	if (s->alarms.globalAlarm == STATE_OFF)
+//		return;
+        if (g_pSysState->state.alarms.globalAlarm == STATE_OFF)
+		return;
+
+//	if (s->alarms.battery || s->alarms.poweroutage || s->alarms.SD_card_failure)
+//		return;
+      if (g_pSysState->state.alarms.battery || g_pSysState->state.alarms.poweroutage || g_pSysState->state.alarms.SD_card_failure)
+		return;
+        
+	for (t = 0; t < SYSTEM_NUM_SENSORS; t++) {
+		sensor = getAlarmsSensor(t);
+		if (sensor->state.lowAlarm || sensor->state.highAlarm
+				|| sensor->state.alarm)
+			return;
+	}
+
+        state_clear_alarm_state();
+}
+
+void state_check_force_upload_flags() {
+
+	if (SYSTEM_SWITCH.powerAvailChanged && g_pDevCfg->stBattPowerAlertParam.flags.bits.StateForcedUpload) {
+		goto found;
+	}
+
+	if (SYSTEM_SWITCH.tempBoundaryCrossed) {
+	  	SYSTEM_SWITCH.tempBoundaryCrossed = false;
+		goto found;
+	}
+
+	return;
+	
+   found:
+	event_force_upload(0);
+}
+
+void state_check_disconn_flags() 
+{
+	int t;
+	bool sensorFound = false;
+	SENSOR_STATUS *sensor;
+
+	for (t = 0; t < SYSTEM_NUM_SENSORS; t++) {
+		sensor = getAlarmsSensor(t);
+		if (sensor->state.connStateChange && !sensor->state.disabled) {
+			sensorFound = true;
+		}
+	}
+	if(sensorFound) goto found;
+
+	return;
+	
+   found:
+	//data_send_api_packet(API_PACKET_ALARM_CONN);
+         check_sensor_alarm();
+        
+}
+
+void state_process() {
+
+	static uint32_t last_check = 0;
+	if (last_check == rtc_get_second_tick())
+		return;
+	last_check = rtc_get_second_tick();
+
+#ifdef __CHECK_STACK__
+	if (g_pSysCfg->stackLeft<64) {
+		alarm_low_memory();
+	}
+#endif
+        
+#ifndef _FISM_
+	state_check_modem();
+	state_check_SD_card();
+        if(g_pSysState->fw_flag == 1 || g_pSysState->fw_flag == 2) {
+         data_send_alarm();
+         alarm_sms(FWU_FAILURE, 0);
+         g_pSysState->fw_flag = 0;
+        }
+#endif
+         
+        if(g_pSysState->state.alarms.time_failure) 
+        {
+          alarm_packet("TIME ERR");
+          alarm_sms(TIME_FAILURE, 0);
+          g_pSysState->state.alarms.time_failure = 0;
+        }
+        
+#ifndef _FISM_
+   if(cfgGetAppMode() != APP_MODE_ST) {
+        alarm_monitor();
+ //       state_check_force_upload_flags();
+    }
+	state_check_disconn_flags();
+	// Global check for all the alarms
+	state_check_alarm_states();
+#endif
+}

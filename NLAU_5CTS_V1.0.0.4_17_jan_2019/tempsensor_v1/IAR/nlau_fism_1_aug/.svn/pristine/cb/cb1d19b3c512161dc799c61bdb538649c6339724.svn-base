@@ -1,0 +1,103 @@
+#STRING LIST
+
+
+[LCD]
+0=Service Mode
+1=----LCD-INIT----
+2=---SUCCESSFUL---
+3=Buzzer Test
+4=Press Stop Alarm
+5=SDcard Failure
+6=FAT Not Initialized
+7=No ini File
+8=SDcard Success
+9=Finished Boot
+10=Modem Failed
+11=SIMs Failed
+12=Parsing Config
+13=Saving Config
+14=SMS Gateway
+15=Gateway IP
+16=Config URL
+17=Upload URL
+18=Config
+19=SIM Error
+20=Power Cable
+21=Disconnected
+22=Power Resumed
+23=HTTP Error
+24=Alarm
+25=Press Again
+26=To Swap SIM
+27=To Re-Calibrate
+28=Low Battery
+29=Hibernating
+30=Recovering
+31=PING
+32=Failed
+33=Success
+34=HTTP Server
+35=Empty response
+36=Transmit Error
+37=Timeout
+38=Rebooting Now
+39=Fetching SMSs
+40=No New Messages
+41=MSG Processing
+42=Heartbeat Not Sent
+43=Heartbeat Sent
+44=SMS Confirm . .
+45=Service Error
+46=Modem Error
+47=Power On
+48=MCC Retry
+49=MCC Discover
+50=Network Busy
+51=Wrong Date
+52=Last Known Date
+53=SIM Not Inserted
+54=Transmitting . . 
+55=Transmission
+56=Completed
+57=SD Write Failed
+58=Saving Sample . .
+59=Buzzer Off
+60=Buzzer On
+61=Battery Status
+62=Unknown
+63=Full
+64=Ok
+65=Low
+66=UART Failed
+67=Rebooting Modem
+
+[LOG]
+0=REBOOT %s
+1=SWP [%d]
+2=[%d] NETDOWN %d
+3=NET FAIL %s
+4=ERR %s
+5=SIM%d m:%d
+6=BATCH TX %s
+7=BATCH SUCCESS: %d
+8=FILE SUCCESS
+
+[SMS]
+0=Configuring Alerts...
+1=Configuring Events...
+2=Rebooting...
+3=Command Not Accepted...
+4=Low Battery!
+5=Power Outage! ATTENTION!
+6=Please refer to SOP
+
+[RBT]
+0=SCHEDULED
+1=NET_COMMAND
+2=GPRS FAILS
+3=MAIN_DEATH
+4=RECOVERY
+
+[PWR]
+0=Power Outage
+1=Power Available

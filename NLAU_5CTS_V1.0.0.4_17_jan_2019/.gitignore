@@ -1,0 +1,11 @@
+/tempsensor_v1/Debug
+/tempsensor_v1/Release 2
+/tempsensor_v1/.cproject
+/tempsensor_v1/.settings
+/tempsensor_v1/.launches
+/msp430fr59xx_euscia0_spi_09/
+/documentation
+/tempsensor_v1/Release
+*.obj
+*.opt
+msp430fr59xx_euscia0_spi_09/Debug/*
